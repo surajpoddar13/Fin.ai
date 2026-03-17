@@ -1,3 +1,4 @@
+import time
 import streamlit as st
 import yfinance as yf
 import plotly.graph_objects as go
@@ -27,7 +28,7 @@ st.markdown("""
 <style>
 
 .block-container{
-padding-top:1rem;
+padding-top:0.5rem;
 }
 
 .stApp{
@@ -70,10 +71,59 @@ font-weight:bold;
 
 st.markdown("<h1>Fin.ai</h1>", unsafe_allow_html=True)
 
-ticker = st.text_input(
-    "Enter Stock Ticker (Example: NVDA, TSLA, AAPL)",
+query = st.text_input(
+    "Enter Stock or Company (Example: NVDA, Nvidia, Tesla)",
     ""
 )
+
+# ------------------------------------------------
+# GLOBAL TICKER DETECTION (UPDATED 🔥)
+# ------------------------------------------------
+
+def detect_ticker(user_input):
+
+    user_input = user_input.strip()
+
+    # 1️⃣ Try direct ticker
+    try:
+        test = yf.Ticker(user_input.upper())
+        data = test.history(period="1d")
+
+        if not data.empty:
+            return user_input.upper()
+    except:
+        pass
+
+    # 2️⃣ Yahoo global search
+    try:
+        search = yf.Search(user_input, max_results=5)
+        quotes = search.quotes
+
+        if quotes:
+            return quotes[0]["symbol"]
+    except:
+        pass
+
+    # 3️⃣ Try multiple exchanges
+    exchanges = [".NS", ".BO", ".L", ".TO", ".AX", ".HK", ".KS"]
+
+    for ex in exchanges:
+        try:
+            test = yf.Ticker(user_input.upper() + ex)
+            data = test.history(period="1d")
+
+            if not data.empty:
+                return user_input.upper() + ex
+        except:
+            continue
+
+    return None
+
+
+ticker = None
+
+if query:
+    ticker = detect_ticker(query)
 
 # ------------------------------------------------
 # AI AGENT
@@ -98,22 +148,33 @@ agent = Agent(
 )
 
 # ------------------------------------------------
-# DATA FUNCTION (CACHED)
+# STOCK DATA
 # ------------------------------------------------
 
 @st.cache_data(ttl=3600)
 def get_stock_data(ticker):
 
-    stock = yf.Ticker(ticker)
-
-    data = stock.history(period="1y")
-
     try:
-        info = stock.fast_info
-    except:
-        info = {}
 
-    return data, info
+        stock = yf.Ticker(ticker)
+
+        data = None
+
+        for _ in range(3):
+
+            try:
+                data = stock.history(period="6mo")
+
+                if not data.empty:
+                    break
+
+            except:
+                time.sleep(2)
+
+        return data
+
+    except:
+        return None
 
 # ------------------------------------------------
 # MAIN APP
@@ -121,9 +182,13 @@ def get_stock_data(ticker):
 
 if ticker:
 
-    data, info = get_stock_data(ticker)
+    data = get_stock_data(ticker)
 
-    if not data.empty:
+    if data is None or data.empty:
+
+        st.error("Unable to fetch stock data. Try again later.")
+
+    else:
 
         current = round(data["Close"].iloc[-1],2)
         prev = round(data["Close"].iloc[-2],2)
@@ -177,8 +242,7 @@ if ticker:
             x=data.index,
             y=data["Close"],
             mode="lines",
-            line=dict(color="#fbbc05", width=3),
-            name="Price"
+            line=dict(color="#fbbc05", width=3)
         ))
 
         fig.update_traces(
@@ -190,27 +254,13 @@ if ticker:
             plot_bgcolor="white",
             paper_bgcolor="white",
             font=dict(color="black"),
-
-            title=dict(
-                text=f"{ticker.upper()} Price Chart",
-                font=dict(color="#4285f4", size=22)
-            ),
-
-            xaxis=dict(
-                title=dict(text="Date"),
-                tickfont=dict(color="black")
-            ),
-
-            yaxis=dict(
-                title=dict(text="Price ($)"),
-                tickfont=dict(color="black")
-            )
+            title=f"{ticker} Price Chart"
         )
 
         st.plotly_chart(fig, use_container_width=True)
 
         # ------------------------------------------------
-        # TECHNICAL INSIGHTS
+        # INSIGHTS
         # ------------------------------------------------
 
         st.subheader("📊 Stock Insights")
@@ -225,8 +275,6 @@ if ticker:
         col1,col2 = st.columns(2)
 
         with col1:
-
-            st.markdown("### Technical Trend")
 
             signal = "Bullish 📈" if ma50 > ma200 else "Bearish 📉"
 
@@ -244,8 +292,6 @@ if ticker:
             }))
 
         with col2:
-
-            st.markdown("### Risk Indicator")
 
             st.table(pd.DataFrame({
                 "Metric":[
@@ -267,21 +313,20 @@ if ticker:
         if st.button("Generate Analysis"):
 
             prompt = f"""
-            Analyze the stock {ticker}.
+            Analyze stock {ticker}
 
-            Current price: ${current}
+            Current price ${current}
 
             Provide:
-
-            - Company overview
-            - Growth potential
-            - Risks
+            - company overview
+            - growth potential
+            - risks
             """
 
             response = agent.run(prompt)
 
             st.markdown(response.content)
 
-    else:
+elif query:
 
-        st.error("Stock not found. Please enter a valid ticker like NVDA, TSLA, AAPL.")
+    st.error("Stock not recognized. Try Tesla, Nvidia, Tata, Reliance, etc.")
